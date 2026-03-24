@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mini Liên Quân 2D - 10vs10</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; touch-action: none; font-family: sans-serif; }
+        canvas { display: block; }
+        .btn-ui { pointer-events: auto; background: rgba(30, 41, 59, 0.9); border: 1px solid #475569; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; user-select: none; }
+        .item-slot { width: 45px; height: 45px; border: 1px dashed #475569; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; background: rgba(15, 23, 42, 0.8); }
+        .shop-item { background: #1e293b; border: 1px solid #334155; padding: 8px; border-radius: 8px; cursor: pointer; pointer-events: auto; }
+        .shop-item:hover { background: #334155; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer" class="absolute inset-0 pointer-events-none text-white select-none">
+        <!-- Thông tin Player -->
+        <div class="absolute top-4 left-4 flex flex-col gap-2">
+            <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-700 w-56 shadow-2xl">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold text-blue-400">LV.<span id="p-lv">1</span> Xạ Thủ</span>
+                    <span class="text-xs text-yellow-500 font-bold">$<span id="p-gold">0</span></span>
+                </div>
+                <!-- HP Bar -->
+                <div class="w-full bg-slate-800 h-3 rounded-full mb-1 overflow-hidden border border-slate-700">
+                    <div id="p-hp-bar" class="bg-green-500 h-full w-full"></div>
+                </div>
+                <!-- EXP Bar -->
+                <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div id="p-exp-bar" class="bg-blue-500 h-full w-0"></div>
+                </div>
+                <!-- Items -->
+                <div class="flex gap-1 mt-2">
+                    <div id="slot-0" class="item-slot"></div>
+                    <div id="slot-1" class="item-slot"></div>
+                    <div id="slot-2" class="item-slot"></div>
+                    <div id="slot-3" class="item-slot"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shop & Stats -->
+        <div class="absolute top-4 right-4 flex flex-col gap-2 items-end">
+            <div id="shop" class="bg-slate-900/90 p-3 rounded-xl border border-slate-700 w-48 flex flex-col gap-2 pointer-events-auto">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-700 pb-1">Cửa hàng</div>
+                <div onclick="game.buyItem(0)" class="shop-item flex justify-between"><span>⚔️ Kiếm</span> <span class="text-yellow-500">$500</span></div>
+                <div onclick="game.buyItem(1)" class="shop-item flex justify-between"><span>🛡️ Giáp</span> <span class="text-yellow-500">$500</span></div>
+                <div onclick="game.buyItem(2)" class="shop-item flex justify-between"><span>👟 Giày</span> <span class="text-yellow-500">$300</span></div>
+                <div onclick="game.buyItem(3)" class="shop-item flex justify-between"><span>📖 Sách</span> <span class="text-yellow-500">$600</span></div>
+            </div>
+        </div>
+
+        <!-- Skill Controls -->
+        <div class="absolute bottom-8 right-8 flex items-end gap-4">
+            <div class="flex flex-col gap-4 mb-12">
+                <div id="btn-s2" class="btn-ui w-14 h-14 text-[10px] border-blue-500">TỐC HÀNH</div>
+                <div id="btn-s1" class="btn-ui w-16 h-16 text-xs border-red-500">ĐẠN LAN</div>
+            </div>
+            <div id="btn-atk" class="btn-ui w-24 h-24 text-lg border-yellow-500 font-bold bg-yellow-600/20">ĐÁNH</div>
+        </div>
+
+        <!-- Màn hình kết thúc -->
+        <div id="game-over" class="hidden absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto">
+            <h1 id="go-text" class="text-7xl font-black mb-8 italic tracking-tighter">VICTORY</h1>
+            <button onclick="location.reload()" class="px-10 py-4 bg-blue-600 rounded-full font-bold text-xl hover:bg-blue-500 transition-all">CHƠI LẠI</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let width = window.innerWidth, height = window.innerHeight;
+    canvas.width = width; canvas.height = height;
+    window.addEventListener('resize', () => { width=canvas.width=window.innerWidth; height=canvas.height=window.innerHeight; });
+
+    const MAP_W = 4000, MAP_H = 2400;
+    const TEAM_BLUE = 1, TEAM_RED = 2;
+    const camera = { x: 0, y: 0, zoom: 0.7 }; // Thêm Zoom để tăng tầm nhìn
+    const keys = {}, joystick = { active: false, x: 0, y: 0, ox: 0, oy: 0, dx: 0, dy: 0, currX: 0, currY: 0 }, buttons = { atk: false, s1: false, s2: false };
+
+    const dist = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
+    
+    const ITEMS = [
+        { name: "Kiếm", icon: "⚔️", price: 500, atk: 40, hp: 0, spd: 0 },
+        { name: "Giáp", icon: "🛡️", price: 500, atk: 0, hp: 400, spd: 0 },
+        { name: "Giày", icon: "👟", price: 300, atk: 0, hp: 0, spd: 50 },
+        { name: "Sách", icon: "📖", price: 600, atk: 20, hp: 200, spd: 20 }
+    ];
+
+    class Entity {
+        constructor(x, y, radius, hp, team) {
+            this.x = x; this.y = y; this.radius = radius;
+            this.maxHp = hp; this.hp = hp; this.team = team;
+            this.dead = false; this.lv = 1; this.exp = 0;
+        }
+        takeDamage(amt, attacker) {
+            if (this.dead) return;
+            this.hp -= amt;
+            if (this.hp <= 0) {
+                this.hp = 0; this.dead = true;
+                if (attacker && attacker.team !== this.team) attacker.gainExp(this.getExpValue());
+                this.onDeath();
+            }
+        }
+        onDeath() {}
+        getExpValue() { return 50; }
+        gainExp(amt) {
+            this.exp += amt;
+            const nextLvReq = this.lv * 150;
+            if (this.exp >= nextLvReq) {
+                this.lv++;
+                this.exp -= nextLvReq;
+                this.maxHp += 200;
+                this.hp = this.maxHp;
+                if (this instanceof Unit) this.damage += 15;
+            }
+        }
+        drawHP(ctx) {
+            const bw = this.radius * 2.5, bh = 5;
+            const px = this.x - camera.x - bw/2, py = this.y - camera.y - this.radius - 12;
+            ctx.fillStyle = '#000'; ctx.fillRect(px, py, bw, bh);
+            ctx.fillStyle = this.team === TEAM_BLUE ? '#22c55e' : '#ef4444';
+            ctx.fillRect(px, py, bw * (this.hp/this.maxHp), bh);
+        }
+    }
+
+    class Tower extends Entity {
+        constructor(x, y, team) {
+            super(x, y, 45, 3000, team);
+            this.range = 350; this.atkCooldown = 2.0; this.currentCooldown = 0;
+        }
+        getExpValue() { return 500; }
+        update(dt) {
+            if (this.dead) return;
+            if (this.currentCooldown > 0) this.currentCooldown -= dt;
+            else {
+                let target = game.findNearestEnemy(this, this.range);
+                if (target) {
+                    game.projectiles.push(new Projectile(this.x, this.y, target, 150, this.team, 400, true));
+                    this.currentCooldown = this.atkCooldown;
+                }
+            }
+        }
+        draw(ctx) {
+            const cx = this.x - camera.x, cy = this.y - camera.y;
+            ctx.fillStyle = this.team === TEAM_BLUE ? '#1e40af' : '#991b1b';
+            ctx.beginPath(); ctx.rect(cx - 30, cy - 30, 60, 60); ctx.fill();
+            ctx.fillStyle = '#64748b'; ctx.fillRect(cx - 20, cy - 50, 40, 20);
+            this.drawHP(ctx);
+        }
+    }
+
+    class Projectile {
+        constructor(x, y, target, dmg, team, speed, isTower = false) {
+            this.x = x; this.y = y; this.target = target; this.dmg = dmg;
+            this.team = team; this.speed = speed; this.active = true;
+            this.radius = isTower ? 10 : 5;
+            this.isTower = isTower;
+        }
+        update(dt) {
+            if (!this.target || this.target.dead) { this.active = false; return; }
+            const d = dist(this.x, this.y, this.target.x, this.target.y);
+            const vx = (this.target.x - this.x) / d, vy = (this.target.y - this.y) / d;
+            this.x += vx * this.speed * dt; this.y += vy * this.speed * dt;
+            if (d < 15) {
+                this.target.takeDamage(this.dmg, game.player);
+                this.active = false;
+            }
+        }
+        draw(ctx) {
+            ctx.fillStyle = this.isTower ? '#fbbf24' : '#fff';
+            ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, this.radius, 0, Math.PI*2); ctx.fill();
+        }
+    }
+
+    class Unit extends Entity {
+        constructor(x, y, radius, hp, team, speed, dmg, range) {
+            super(x, y, radius, hp, team);
+            this.speed = speed; this.damage = dmg; this.range = range;
+            this.atkCd = 0.8; this.curCd = 0;
+        }
+        update(dt) {
+            if (this.dead) return;
+            if (this.curCd > 0) this.curCd -= dt;
+        }
+    }
+
+    class HeroAI extends Unit {
+        constructor(x, y, team) {
+            super(x, y, 22, 1200, team, 220, 70, 250);
+        }
+        update(dt) {
+            super.update(dt);
+            let enemy = game.findNearestEnemy(this, 600);
+            if (enemy) {
+                const d = dist(this.x, this.y, enemy.x, enemy.y);
+                if (d < this.range) {
+                    if (this.curCd <= 0) {
+                        game.projectiles.push(new Projectile(this.x, this.y, enemy, this.damage, this.team, 500));
+                        this.curCd = this.atkCd;
+                    }
+                } else {
+                    const vx = (enemy.x - this.x)/d, vy = (enemy.y - this.y)/d;
+                    this.x += vx * this.speed * dt; this.y += vy * this.speed * dt;
+                }
+            } else {
+                const targetX = this.team === TEAM_BLUE ? MAP_W : 0;
+                this.x += (this.team === TEAM_BLUE ? 1 : -1) * this.speed * 0.5 * dt;
+            }
+        }
+        draw(ctx) {
+            const cx = this.x - camera.x, cy = this.y - camera.y;
+            ctx.fillStyle = this.team === TEAM_BLUE ? '#3b82f6' : '#ef4444';
+            ctx.beginPath(); ctx.arc(cx, cy, this.radius, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            this.drawHP(ctx);
+        }
+    }
+
+    class Player extends Unit {
+        constructor(x, y) {
+            super(x, y, 25, 1500, TEAM_BLUE, 260, 100, 300);
+            this.gold = 1000; this.items = []; this.s1Cd = 0; this.s2Cd = 0; this.buffT = 0;
+        }
+        update(dt) {
+            super.update(dt);
+            if (this.s1Cd > 0) this.s1Cd -= dt;
+            if (this.s2Cd > 0) this.s2Cd -= dt;
+            if (this.buffT > 0) { this.buffT -= dt; if(this.buffT <= 0) this.speed -= 150; }
+
+            // Xử lý Input di chuyển cực nhạy
+            let inputX = 0, inputY = 0;
+            if (keys['w'] || keys['ArrowUp']) inputY -= 1;
+            if (keys['s'] || keys['ArrowDown']) inputY += 1;
+            if (keys['a'] || keys['ArrowLeft']) inputX -= 1;
+            if (keys['d'] || keys['ArrowRight']) inputX += 1;
+            
+            // Joystick ghi đè phím nếu đang hoạt động
+            if (joystick.active) { 
+                inputX = joystick.dx; 
+                inputY = joystick.dy; 
+            }
+
+            if (inputX !== 0 || inputY !== 0) {
+                const mag = Math.hypot(inputX, inputY);
+                this.x += (inputX / mag) * this.speed * dt;
+                this.y += (inputY / mag) * this.speed * dt;
+            }
+
+            this.x = Math.max(this.radius, Math.min(MAP_W - this.radius, this.x));
+            this.y = Math.max(this.radius, Math.min(MAP_H - this.radius, this.y));
+
+            if (buttons.atk && this.curCd <= 0) {
+                let enemy = game.findNearestEnemy(this, this.range);
+                if (enemy) {
+                    game.projectiles.push(new Projectile(this.x, this.y, enemy, this.damage, this.team, 600));
+                    this.curCd = this.atkCd;
+                }
+            }
+            if (buttons.s1 && this.s1Cd <= 0) {
+                this.useS1(); this.s1Cd = 6;
+                buttons.s1 = false;
+            }
+            if (buttons.s2 && this.s2Cd <= 0) {
+                this.speed += 150; this.buffT = 3; this.s2Cd = 10;
+                buttons.s2 = false;
+            }
+        }
+        useS1() {
+            for(let i=0; i<8; i++) {
+                const ang = (i/8) * Math.PI*2;
+                const targetDummy = { x: this.x + Math.cos(ang)*500, y: this.y + Math.sin(ang)*500, dead: false, takeDamage:()=>{} };
+                game.projectiles.push(new Projectile(this.x, this.y, targetDummy, this.damage*0.8, this.team, 500));
+            }
+        }
+        draw(ctx) {
+            const cx = this.x - camera.x, cy = this.y - camera.y;
+            if (this.buffT > 0) { ctx.fillStyle = 'rgba(59,130,246,0.2)'; ctx.beginPath(); ctx.arc(cx, cy, 40, 0, Math.PI*2); ctx.fill(); }
+            ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(cx, cy, this.radius, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+            this.drawHP(ctx);
+        }
+    }
+
+    const game = {
+        entities: [], projectiles: [], player: null, lastT: 0,
+        init() {
+            this.player = new Player(200, MAP_H/2);
+            this.entities.push(this.player);
+
+            for(let i=0; i<10; i++) {
+                const laneY = [400, MAP_H/2, MAP_H-400][i % 3];
+                const laneX_B = 600 + (Math.floor(i/3) * 400);
+                const laneX_R = MAP_W - 600 - (Math.floor(i/3) * 400);
+                this.entities.push(new Tower(laneX_B, laneY + (Math.random()-0.5)*100, TEAM_BLUE));
+                this.entities.push(new Tower(laneX_R, laneY + (Math.random()-0.5)*100, TEAM_RED));
+            }
+
+            for(let i=0; i<9; i++) this.entities.push(new HeroAI(300, Math.random()*MAP_H, TEAM_BLUE));
+            for(let i=0; i<10; i++) this.entities.push(new HeroAI(MAP_W-300, Math.random()*MAP_H, TEAM_RED));
+
+            this.setupUI();
+            this.lastT = performance.now();
+            requestAnimationFrame(t => this.loop(t));
+        },
+        findNearestEnemy(me, range) {
+            let best = null, minDist = range;
+            for(let e of this.entities) {
+                if (e !== me && e.team !== me.team && !e.dead) {
+                    const d = dist(me.x, me.y, e.x, e.y);
+                    if (d < minDist) { minDist = d; best = e; }
+                }
+            }
+            return best;
+        },
+        buyItem(idx) {
+            const item = ITEMS[idx];
+            if (this.player.gold >= item.price && this.player.items.length < 4) {
+                this.player.gold -= item.price;
+                this.player.items.push(item);
+                this.player.damage += item.atk;
+                this.player.maxHp += item.hp;
+                this.player.hp += item.hp;
+                this.player.speed += item.spd;
+                this.updateItemUI();
+            }
+        },
+        updateItemUI() {
+            this.player.items.forEach((it, i) => {
+                const slot = document.getElementById(`slot-${i}`);
+                if (slot) slot.innerText = it.icon;
+            });
+        },
+        setupUI() {
+            const bind = (id, act) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.onmousedown = el.ontouchstart = (e) => { e.preventDefault(); buttons[act] = true; };
+                el.onmouseup = el.onmouseleave = el.ontouchend = () => { buttons[act] = false; };
+            };
+            bind('btn-atk', 'atk'); bind('btn-s1', 's1'); bind('btn-s2', 's2');
+            
+            canvas.addEventListener('touchstart', (e) => {
+                const t = e.touches[0];
+                if(t.clientX < width / 2) {
+                    joystick.active = true;
+                    joystick.ox = t.clientX;
+                    joystick.oy = t.clientY;
+                    joystick.currX = t.clientX;
+                    joystick.currY = t.clientY;
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if(!joystick.active) return;
+                e.preventDefault();
+                const t = e.touches[0];
+                const dx = t.clientX - joystick.ox;
+                const dy = t.clientY - joystick.oy;
+                const d = Math.hypot(dx, dy) || 1;
+                const maxD = 50;
+                
+                joystick.dx = dx / d;
+                joystick.dy = dy / d;
+                joystick.currX = joystick.ox + joystick.dx * Math.min(d, maxD);
+                joystick.currY = joystick.oy + joystick.dy * Math.min(d, maxD);
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', () => {
+                joystick.active = false;
+                joystick.dx = joystick.dy = 0;
+            });
+
+            window.addEventListener('keydown', e => keys[e.key] = true);
+            window.addEventListener('keyup', e => keys[e.key] = false);
+        },
+        loop(t) {
+            const dt = Math.min((t - this.lastT)/1000, 0.1); 
+            this.lastT = t;
+            this.update(dt); 
+            this.render();
+            if(!this.player.dead) requestAnimationFrame(t => this.loop(t));
+            else this.gameOver(false);
+        },
+        update(dt) {
+            this.entities.forEach(e => e.update(dt));
+            this.projectiles.forEach(p => p.update(dt));
+            
+            this.entities = this.entities.filter(e => !e.dead || e instanceof Player);
+            this.projectiles = this.projectiles.filter(p => p.active);
+            
+            // Cập nhật Camera với Zoom
+            const targetCamX = this.player.x - (width/2) / camera.zoom;
+            const targetCamY = this.player.y - (height/2) / camera.zoom;
+            camera.x += (targetCamX - camera.x) * 0.1;
+            camera.y += (targetCamY - camera.y) * 0.1;
+            
+            // Giới hạn Camera trong map
+            camera.x = Math.max(0, Math.min(MAP_W - width / camera.zoom, camera.x));
+            camera.y = Math.max(0, Math.min(MAP_H - height / camera.zoom, camera.y));
+
+            document.getElementById('p-lv').innerText = this.player.lv;
+            document.getElementById('p-gold').innerText = Math.floor(this.player.gold);
+            document.getElementById('p-hp-bar').style.width = (this.player.hp/this.player.maxHp)*100 + '%';
+            document.getElementById('p-exp-bar').style.width = (this.player.exp/(this.player.lv*150))*100 + '%';
+            
+            this.player.gold += dt * 5;
+
+            const redTowers = this.entities.filter(e => e instanceof Tower && e.team === TEAM_RED);
+            if(redTowers.length === 0) this.gameOver(true);
+        },
+        gameOver(win) {
+            const el = document.getElementById('game-over');
+            el.classList.remove('hidden');
+            const goText = document.getElementById('go-text');
+            goText.innerText = win ? "VICTORY" : "DEFEAT";
+            goText.className = win ? "text-7xl font-black mb-8 italic tracking-tighter text-blue-500" : "text-7xl font-black mb-8 italic tracking-tighter text-red-500";
+        },
+        render() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.save();
+            // Áp dụng Zoom
+            ctx.scale(camera.zoom, camera.zoom);
+            
+            // Nền Map
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(-camera.x, -camera.y, MAP_W, MAP_H);
+            
+            // Lưới Map
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            for(let i=0; i<=MAP_W; i+=200) { ctx.moveTo(i-camera.x, -camera.y); ctx.lineTo(i-camera.x, MAP_H-camera.y); }
+            for(let j=0; j<=MAP_H; j+=200) { ctx.moveTo(-camera.x, j-camera.y); ctx.lineTo(MAP_W-camera.x, j-camera.y); }
+            ctx.stroke();
+            
+            this.entities.forEach(e => e.draw(ctx));
+            this.projectiles.forEach(p => p.draw(ctx));
+            
+            ctx.restore();
+
+            // Vẽ Joystick (không bị ảnh hưởng bởi Zoom)
+            if(joystick.active) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(joystick.ox, joystick.oy, 55, 0, Math.PI*2); ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.beginPath(); ctx.arc(joystick.currX, joystick.currY, 25, 0, Math.PI*2); ctx.fill();
+            }
+        }
+    };
+
+    game.init();
+</script>
+</body>
+</html>

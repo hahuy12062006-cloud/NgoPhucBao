@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ChatSex</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; margin: 0; background: #f0f2f5; }
+        
+        /* Giao diện nhập tên */
+        #login-screen { position: fixed; inset: 0; background: #0084ff; display: flex; 
+                        flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        #login-screen input { padding: 12px; border-radius: 8px; border: none; width: 250px; font-size: 16px; }
+        #login-screen button { margin-top: 10px; padding: 10px 25px; border-radius: 8px; border: none; 
+                               background: #fff; color: #0084ff; font-weight: bold; cursor: pointer; }
+
+        /* Giao diện Chat (Ẩn lúc đầu) */
+        #chat-screen { display: none; flex-direction: column; height: 100vh; }
+        #messages { flex: 1; list-style-type: none; padding: 15px; overflow-y: auto; }
+        #messages li { margin-bottom: 12px; padding: 8px 15px; border-radius: 15px; background: white; max-width: 80%; width: fit-content; }
+        .user-name { font-weight: bold; color: #0084ff; display: block; font-size: 0.8em; margin-bottom: 3px; }
+
+        #form { display: flex; padding: 15px; background: white; border-top: 1px solid #ddd; }
+        #input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; }
+        #form button { background: #0084ff; color: white; border: none; border-radius: 50%; width: 40px; margin-left: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <h2 style="color: white;">Chào mừng bạn!</h2>
+        <input id="nickname" placeholder="Nhập tên của bạn..." autocomplete="off" />
+        <button onclick="joinChat()">Vào Chat</button>
+    </div>
+
+    <div id="chat-screen">
+        <ul id="messages"></ul>
+        <form id="form">
+            <input id="input" autocomplete="off" placeholder="Nhắn gì đó..." /><button>➤</button>
+        </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        var socket = io();
+        var myName = "";
+
+        function joinChat() {
+            var nameInput = document.getElementById('nickname');
+            if (nameInput.value.trim() !== "") {
+                myName = nameInput.value;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('chat-screen').style.display = 'flex';
+            }
+        }
+
+        var form = document.getElementById('form');
+        var input = document.getElementById('input');
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (input.value) {
+                // Gửi Object chứa cả tên và tin nhắn
+                socket.emit('chat message', { name: myName, msg: input.value });
+                input.value = '';
+            }
+        });
+
+        socket.on('chat message', function(data) {
+            var item = document.createElement('li');
+            // Hiển thị tên người gửi bên trên tin nhắn
+            item.innerHTML = `<span class="user-name">${data.name}</span> ${data.msg}`;
+            document.getElementById('messages').appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+    </script>
+</body>
+</html>
